@@ -3,6 +3,8 @@ package gui
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 
 	"gioui.org/app"
 	"gioui.org/layout"
@@ -10,6 +12,15 @@ import (
 	"gioui.org/unit"
 
 	"gox-ide/pkg/core"
+)
+
+// Performance: Pool for window title building
+var (
+	windowTitlePool = sync.Pool{
+		New: func() interface{} {
+			return &strings.Builder{}
+		},
+	}
 )
 
 // Window implements IDEWindow
@@ -36,14 +47,38 @@ func NewWindow(config IDEConfig) *Window {
 	w := &Window{
 		config: config,
 		theme:  theme,
-		window: new(app.Window),
+		window: &app.Window{},
 	}
 
-	// Initialize components
-	w.fileExplorer = NewFileExplorer(config.Project)
-	w.editor = NewTextEditor()
-	w.statusBar = NewStatusBar()
-	w.toolBar = NewToolBar()
+	// Initialize components via dependency injection or factory
+	factory := config.Factory
+	if factory == nil {
+		factory = NewDefaultFactory()
+	}
+
+	if config.FileExplorer != nil {
+		w.fileExplorer = config.FileExplorer
+	} else {
+		w.fileExplorer = factory.CreateFileExplorer(config.Project)
+	}
+
+	if config.Editor != nil {
+		w.editor = config.Editor
+	} else {
+		w.editor = factory.CreateEditor()
+	}
+
+	if config.StatusBar != nil {
+		w.statusBar = config.StatusBar
+	} else {
+		w.statusBar = factory.CreateStatusBar()
+	}
+
+	if config.ToolBar != nil {
+		w.toolBar = config.ToolBar
+	} else {
+		w.toolBar = factory.CreateToolBar()
+	}
 
 	// Setup event handlers
 	w.setupEventHandlers()
@@ -130,7 +165,12 @@ func (w *Window) ShowMessage(message string) {
 // ShowError displays an error message
 func (w *Window) ShowError(err error) {
 	if w.statusBar != nil {
-		w.statusBar.SetMessage(fmt.Sprintf("Error: %v", err))
+		msg := windowTitlePool.Get().(*strings.Builder)
+		msg.Reset()
+		msg.WriteString("Error: ")
+		msg.WriteString(err.Error())
+		w.statusBar.SetMessage(msg.String())
+		windowTitlePool.Put(msg)
 	}
 }
 
@@ -177,7 +217,13 @@ func (w *Window) onFileSelect(file *core.FileInfo) {
 func (w *Window) onEditorChange() {
 	if file := w.editor.GetCurrentFile(); file != nil {
 		// Update title to show unsaved changes
-		title := fmt.Sprintf("GoX IDE - %s*", file.Name)
+		msg := windowTitlePool.Get().(*strings.Builder)
+		msg.Reset()
+		msg.WriteString("GoX IDE - ")
+		msg.WriteString(file.Name)
+		msg.WriteString("*")
+		title := msg.String()
+		windowTitlePool.Put(msg)
 		w.SetTitle(title)
 
 		// Update status
@@ -275,15 +321,30 @@ func (w *Window) updateTitle() {
 	title := "GoX IDE"
 
 	if w.config.Project != nil {
-		title = fmt.Sprintf("GoX IDE - %s", w.config.Project.Name())
+		msg := windowTitlePool.Get().(*strings.Builder)
+		msg.Reset()
+		msg.WriteString("GoX IDE - ")
+		msg.WriteString(w.config.Project.Name())
+		title = msg.String()
+		windowTitlePool.Put(msg)
 	}
 
 	if file := w.editor.GetCurrentFile(); file != nil {
-		title = fmt.Sprintf("GoX IDE - %s", file.Name)
+		msg := windowTitlePool.Get().(*strings.Builder)
+		msg.Reset()
+		msg.WriteString("GoX IDE - ")
+		msg.WriteString(file.Name)
+		title = msg.String()
+		windowTitlePool.Put(msg)
 		if w.editor.IsDirty() {
 			title += "*"
 		}
 	}
 
 	w.SetTitle(title)
+}
+
+// GetToolBar returns the toolbar component
+func (w *Window) GetToolBar() ToolBar {
+	return w.toolBar
 }

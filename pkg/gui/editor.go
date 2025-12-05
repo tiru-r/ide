@@ -1,9 +1,12 @@
+// Package gui provides text editor components for the IDE.
 package gui
 
 import (
+	"errors"
 	"image/color"
 	"os"
 	"strings"
+	"sync"
 
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -15,6 +18,22 @@ import (
 	"gox-ide/pkg/core"
 )
 
+const (
+	// MaxFileSize prevents loading files larger than 50MB for performance
+	MaxFileSize = 50 * 1024 * 1024 // 50MB
+)
+
+var (
+	ErrFileTooLarge = errors.New("file too large to open in editor")
+	
+	// Performance: Pool of strings.Builder for reducing allocations
+	builderPool = sync.Pool{
+		New: func() interface{} {
+			return &strings.Builder{}
+		},
+	}
+)
+
 // TextEditorImpl implements Editor interface
 type TextEditorImpl struct {
 	id          string
@@ -22,6 +41,10 @@ type TextEditorImpl struct {
 	currentFile *core.FileInfo
 	dirty       bool
 	onChange    func()
+	
+	// Performance optimization: cache line count
+	cachedContent string
+	cachedLineCount int
 }
 
 // NewTextEditor creates a new text editor component
@@ -47,6 +70,11 @@ func (te *TextEditorImpl) OpenFile(file *core.FileInfo) error {
 		return nil
 	}
 
+	// Check file size for performance protection
+	if file.Size > MaxFileSize {
+		return ErrFileTooLarge
+	}
+
 	// Read file content
 	content, err := os.ReadFile(file.Path)
 	if err != nil {
@@ -57,6 +85,7 @@ func (te *TextEditorImpl) OpenFile(file *core.FileInfo) error {
 	te.editor.SetText(string(content))
 	te.currentFile = file
 	te.dirty = false
+	te.invalidateCache() // Clear cache for new file
 
 	return nil
 }
@@ -69,7 +98,14 @@ func (te *TextEditorImpl) GetContent() string {
 // SetContent sets the editor content
 func (te *TextEditorImpl) SetContent(content string) {
 	te.editor.SetText(content)
+	te.invalidateCache()
 	te.markDirty()
+}
+
+// invalidateCache clears the line count cache
+func (te *TextEditorImpl) invalidateCache() {
+	te.cachedContent = ""
+	te.cachedLineCount = 0
 }
 
 // Save saves the current content to file
@@ -174,11 +210,33 @@ func (te *TextEditorImpl) layoutEditor(gtx layout.Context, theme *material.Theme
 	)
 }
 
+// getLineCount efficiently counts lines with caching
+func (te *TextEditorImpl) getLineCount() int {
+	content := te.GetContent()
+	
+	// Use cache if content hasn't changed
+	if content == te.cachedContent {
+		return te.cachedLineCount
+	}
+	
+	// Count newlines efficiently without splitting
+	lineCount := 1
+	for _, char := range content {
+		if char == '\n' {
+			lineCount++
+		}
+	}
+	
+	// Update cache
+	te.cachedContent = content
+	te.cachedLineCount = lineCount
+	
+	return lineCount
+}
+
 // layoutLineNumbers renders line numbers on the left side
 func (te *TextEditorImpl) layoutLineNumbers(gtx layout.Context, theme *material.Theme) layout.Dimensions {
-	content := te.GetContent()
-	lines := strings.Split(content, "\n")
-	lineCount := len(lines)
+	lineCount := te.getLineCount()
 
 	return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		// Draw line numbers background
@@ -190,8 +248,11 @@ func (te *TextEditorImpl) layoutLineNumbers(gtx layout.Context, theme *material.
 			Left: unit.Dp(8), Right: unit.Dp(8),
 		}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 
-			// Create line number text
-			var lineNumbers strings.Builder
+			// Create line number text using pooled builder for performance
+			lineNumbers := builderPool.Get().(*strings.Builder)
+			lineNumbers.Reset()
+			defer builderPool.Put(lineNumbers)
+			
 			for i := 1; i <= lineCount; i++ {
 				if i > 1 {
 					lineNumbers.WriteString("\n")
@@ -225,25 +286,31 @@ func (te *TextEditorImpl) markDirty() {
 // sprintf is a simple sprintf replacement since we can't import fmt
 func sprintf(format string, value int) string {
 	// Simple integer formatting for line numbers
-	str := ""
 	if value == 0 {
 		return "   0"
 	}
 
+	// Pre-allocate slice with sufficient capacity to avoid reallocations
+	digits := make([]rune, 0, 10) // max 10 digits for int
 	num := value
-	digits := []rune{}
 
 	for num > 0 {
 		digit := num % 10
-		digits = append([]rune{rune('0' + digit)}, digits...)
+		digits = append(digits, rune('0'+digit))
 		num /= 10
 	}
 
-	str = string(digits)
+	// Reverse digits in-place to avoid allocations
+	for i, j := 0, len(digits)-1; i < j; i, j = i+1, j-1 {
+		digits[i], digits[j] = digits[j], digits[i]
+	}
 
-	// Pad to 4 characters
-	for len(str) < 4 {
-		str = " " + str
+	str := string(digits)
+
+	// Use efficient padding with strings.Repeat
+	if len(str) < 4 {
+		padding := 4 - len(str)
+		return strings.Repeat(" ", padding) + str
 	}
 
 	return str

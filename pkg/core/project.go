@@ -1,3 +1,4 @@
+// Package core provides project management functionality for Go IDE.
 package core
 
 import (
@@ -38,7 +39,8 @@ func (p *GoProject) IsGoProject() bool {
 
 // Files returns all files in the project
 func (p *GoProject) Files() ([]FileInfo, error) {
-	var files []FileInfo
+	// Pre-allocate with estimated capacity for better performance
+	files := make([]FileInfo, 0, 64)
 
 	err := p.fs.WalkDir(p.path, func(info FileInfo) error {
 		// Skip hidden files and directories
@@ -83,8 +85,8 @@ func (p *GoProject) buildTree(node *TreeNode, path string, level int) error {
 		return err
 	}
 
-	// Filter visible entries
-	var visibleEntries []FileInfo
+	// Filter visible entries with pre-allocation for performance
+	visibleEntries := make([]FileInfo, 0, len(entries)) // Pre-allocate capacity
 	for _, entry := range entries {
 		if !strings.HasPrefix(entry.Name, ".") &&
 			entry.Name != "vendor" && entry.Name != "node_modules" {

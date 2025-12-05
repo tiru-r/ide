@@ -1,3 +1,4 @@
+// Package core provides structured logging functionality for the IDE.
 package core
 
 import (
@@ -6,7 +7,17 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
+)
+
+// Performance: Pool of strings.Builder for logger
+var (
+	loggerBuilderPool = sync.Pool{
+		New: func() interface{} {
+			return &strings.Builder{}
+		},
+	}
 )
 
 // LogLevel represents logging levels
@@ -100,26 +111,37 @@ func (l *StandardLogger) Error(msg string, fields ...Field) {
 func (l *StandardLogger) log(level LogLevel, msg string, fields ...Field) {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 
-	var fieldStr strings.Builder
+	// Use pooled builder to avoid allocations
+	fieldStr := loggerBuilderPool.Get().(*strings.Builder)
+	fieldStr.Reset()
+	defer loggerBuilderPool.Put(fieldStr)
+	
 	if len(fields) > 0 {
 		fieldStr.WriteString(" [")
 		for i, field := range fields {
 			if i > 0 {
 				fieldStr.WriteString(", ")
 			}
-			fieldStr.WriteString(fmt.Sprintf("%s=%v", field.Key, field.Value))
+			fieldStr.WriteString(field.Key)
+			fieldStr.WriteString("=")
+			fieldStr.WriteString(fmt.Sprintf("%v", field.Value))
 		}
 		fieldStr.WriteString("]")
 	}
 
-	formatted := fmt.Sprintf("%s [%s] %s%s",
-		timestamp,
-		level.String(),
-		msg,
-		fieldStr.String(),
-	)
+	// Use pooled builder for final message too
+	msgBuilder := loggerBuilderPool.Get().(*strings.Builder)
+	msgBuilder.Reset()
+	defer loggerBuilderPool.Put(msgBuilder)
+	
+	msgBuilder.WriteString(timestamp)
+	msgBuilder.WriteString(" [")
+	msgBuilder.WriteString(level.String())
+	msgBuilder.WriteString("] ")
+	msgBuilder.WriteString(msg)
+	msgBuilder.WriteString(fieldStr.String())
 
-	l.logger.Println(formatted)
+	l.logger.Println(msgBuilder.String())
 }
 
 // NoopLogger is a logger that does nothing

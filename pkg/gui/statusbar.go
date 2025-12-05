@@ -3,6 +3,8 @@ package gui
 import (
 	"fmt"
 	"image/color"
+	"strings"
+	"sync"
 
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -11,6 +13,15 @@ import (
 	"gioui.org/widget/material"
 
 	"gox-ide/pkg/core"
+)
+
+// Performance: Pool for status bar message building
+var (
+	statusBuilderPool = sync.Pool{
+		New: func() interface{} {
+			return &strings.Builder{}
+		},
+	}
 )
 
 // StatusBarImpl implements StatusBar interface
@@ -42,7 +53,15 @@ func (sb *StatusBarImpl) SetMessage(message string) {
 // SetFileInfo sets file information display
 func (sb *StatusBarImpl) SetFileInfo(file *core.FileInfo, line, col int) {
 	if file != nil {
-		sb.fileInfo = fmt.Sprintf("%s  Ln %d, Col %d", file.Name, line, col)
+		msg := statusBuilderPool.Get().(*strings.Builder)
+		msg.Reset()
+		msg.WriteString(file.Name)
+		msg.WriteString("  Ln ")
+		msg.WriteString(fmt.Sprintf("%d", line))
+		msg.WriteString(", Col ")
+		msg.WriteString(fmt.Sprintf("%d", col))
+		sb.fileInfo = msg.String()
+		statusBuilderPool.Put(msg)
 	} else {
 		sb.fileInfo = ""
 	}
@@ -96,7 +115,12 @@ func (sb *StatusBarImpl) Layout(gtx layout.Context, theme *material.Theme) layou
 					return layout.Dimensions{}
 				}
 
-				label := material.Caption(theme, fmt.Sprintf("📁 %s", sb.projectInfo))
+				msg := statusBuilderPool.Get().(*strings.Builder)
+				msg.Reset()
+				msg.WriteString("📁 ")
+				msg.WriteString(sb.projectInfo)
+				label := material.Caption(theme, msg.String())
+				statusBuilderPool.Put(msg)
 				label.Color = color.NRGBA{R: 100, G: 100, B: 100, A: 255}
 				return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx, label.Layout)
 			}),

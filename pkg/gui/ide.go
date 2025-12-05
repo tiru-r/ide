@@ -2,9 +2,19 @@ package gui
 
 import (
 	"context"
-	"fmt"
+	"strings"
+	"sync"
 
 	"gox-ide/pkg/core"
+)
+
+// Performance: Pool of strings.Builder for GUI messages
+var (
+	guiMessagePool = sync.Pool{
+		New: func() interface{} {
+			return &strings.Builder{}
+		},
+	}
 )
 
 // IDEApp integrates the GUI with the core IDE functionality
@@ -18,27 +28,37 @@ type IDEApp struct {
 
 // NewIDEApp creates a new GUI IDE application
 func NewIDEApp(project core.Project, builder core.Builder, logger core.Logger) *IDEApp {
+	return NewIDEAppWithConfig(IDEConfig{
+		Project: project,
+		Builder: builder,
+		Logger:  logger,
+	})
+}
+
+// NewIDEAppWithConfig creates a new GUI IDE application with custom configuration
+func NewIDEAppWithConfig(config IDEConfig) *IDEApp {
 	app := &IDEApp{
-		project: project,
-		builder: builder,
-		logger:  logger,
+		project: config.Project,
+		builder: config.Builder,
+		logger:  config.Logger,
 	}
 
-	// Create event handler
-	eventHandler := &ideEventHandler{
-		app: app,
+	// Create event handler if not provided
+	if config.EventHandler == nil {
+		config.EventHandler = &ideEventHandler{
+			app: app,
+		}
 	}
 
-	// Setup configuration
-	app.config = IDEConfig{
-		Project:      project,
-		Builder:      builder,
-		Logger:       logger,
-		Theme:        NewDefaultTheme(),
-		EventHandler: eventHandler,
+	// Set default theme if not provided
+	if config.Theme == nil {
+		config.Theme = NewDefaultTheme()
 	}
 
-	// Create window
+	// Store config
+	app.config = config
+
+	// Create window with loose coupling
 	app.window = NewWindow(app.config)
 
 	return app
@@ -77,12 +97,17 @@ func (h *ideEventHandler) OnFileOpen(file *core.FileInfo) {
 
 	// Update status
 	if statusBar := h.app.window.GetStatusBar(); statusBar != nil {
-		statusBar.SetMessage(fmt.Sprintf("Opened %s", file.Name))
+		msg := guiMessagePool.Get().(*strings.Builder)
+		msg.Reset()
+		msg.WriteString("Opened ")
+		msg.WriteString(file.Name)
+		statusBar.SetMessage(msg.String())
+		guiMessagePool.Put(msg)
 		statusBar.SetFileInfo(file, 1, 1)
 	}
 
 	// Enable save action
-	if toolbar := h.app.window.(*Window).toolBar; toolbar != nil {
+	if toolbar := h.app.window.GetToolBar(); toolbar != nil {
 		toolbar.EnableAction("save", true)
 	}
 }
@@ -100,7 +125,7 @@ func (h *ideEventHandler) OnFileClose(file *core.FileInfo) {
 	}
 
 	// Disable save action
-	if toolbar := h.app.window.(*Window).toolBar; toolbar != nil {
+	if toolbar := h.app.window.GetToolBar(); toolbar != nil {
 		toolbar.EnableAction("save", false)
 	}
 }
@@ -113,7 +138,12 @@ func (h *ideEventHandler) OnFileSave(file *core.FileInfo) error {
 
 	// Update status
 	if statusBar := h.app.window.GetStatusBar(); statusBar != nil {
-		statusBar.SetMessage(fmt.Sprintf("Saved %s", file.Name))
+		msg := guiMessagePool.Get().(*strings.Builder)
+		msg.Reset()
+		msg.WriteString("Saved ")
+		msg.WriteString(file.Name)
+		statusBar.SetMessage(msg.String())
+		guiMessagePool.Put(msg)
 	}
 
 	return nil
@@ -133,7 +163,12 @@ func (h *ideEventHandler) OnProjectChange(project core.Project) {
 	// Update status
 	if statusBar := h.app.window.GetStatusBar(); statusBar != nil {
 		statusBar.SetProjectInfo(project)
-		statusBar.SetMessage(fmt.Sprintf("Project: %s", project.Name()))
+		msg := guiMessagePool.Get().(*strings.Builder)
+		msg.Reset()
+		msg.WriteString("Project: ")
+		msg.WriteString(project.Name())
+		statusBar.SetMessage(msg.String())
+		guiMessagePool.Put(msg)
 	}
 }
 
@@ -155,7 +190,12 @@ func (h *ideEventHandler) OnBuild() error {
 	// Update status based on result
 	if statusBar := h.app.window.GetStatusBar(); statusBar != nil {
 		if err != nil {
-			statusBar.SetMessage(fmt.Sprintf("Build failed: %v", err))
+			msg := guiMessagePool.Get().(*strings.Builder)
+			msg.Reset()
+			msg.WriteString("Build failed: ")
+			msg.WriteString(err.Error())
+			statusBar.SetMessage(msg.String())
+			guiMessagePool.Put(msg)
 		} else {
 			statusBar.SetMessage("Build successful")
 		}
@@ -190,7 +230,12 @@ func (h *ideEventHandler) OnRun() error {
 	// Update status based on result
 	if statusBar := h.app.window.GetStatusBar(); statusBar != nil {
 		if err != nil {
-			statusBar.SetMessage(fmt.Sprintf("Run failed: %v", err))
+			msg := guiMessagePool.Get().(*strings.Builder)
+			msg.Reset()
+			msg.WriteString("Run failed: ")
+			msg.WriteString(err.Error())
+			statusBar.SetMessage(msg.String())
+			guiMessagePool.Put(msg)
 		} else {
 			statusBar.SetMessage("Execution completed")
 		}
@@ -225,7 +270,12 @@ func (h *ideEventHandler) OnTest() error {
 	// Update status based on result
 	if statusBar := h.app.window.GetStatusBar(); statusBar != nil {
 		if err != nil {
-			statusBar.SetMessage(fmt.Sprintf("Tests failed: %v", err))
+			msg := guiMessagePool.Get().(*strings.Builder)
+			msg.Reset()
+			msg.WriteString("Tests failed: ")
+			msg.WriteString(err.Error())
+			statusBar.SetMessage(msg.String())
+			guiMessagePool.Put(msg)
 		} else {
 			statusBar.SetMessage("All tests passed")
 		}

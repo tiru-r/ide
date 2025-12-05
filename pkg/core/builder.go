@@ -1,11 +1,17 @@
+// Package core provides build system integration for Go projects.
 package core
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+)
+
+// Common errors
+var (
+	ErrNotGoProject = errors.New("not a Go project")
 )
 
 // GoBuilder implements Builder interface for Go projects
@@ -23,7 +29,7 @@ func NewGoBuilder(logger Logger) *GoBuilder {
 // Build builds the Go project
 func (b *GoBuilder) Build(ctx context.Context, project Project) error {
 	if !project.IsGoProject() {
-		return fmt.Errorf("not a Go project")
+		return ErrNotGoProject
 	}
 
 	cmd := exec.CommandContext(ctx, "go", "build", ".")
@@ -41,7 +47,7 @@ func (b *GoBuilder) Build(ctx context.Context, project Project) error {
 // Run runs the Go project
 func (b *GoBuilder) Run(ctx context.Context, project Project) error {
 	if !project.IsGoProject() {
-		return fmt.Errorf("not a Go project")
+		return ErrNotGoProject
 	}
 
 	cmd := exec.CommandContext(ctx, "go", "run", ".")
@@ -60,7 +66,7 @@ func (b *GoBuilder) Run(ctx context.Context, project Project) error {
 // Test runs tests for the Go project
 func (b *GoBuilder) Test(ctx context.Context, project Project) error {
 	if !project.IsGoProject() {
-		return fmt.Errorf("not a Go project")
+		return ErrNotGoProject
 	}
 
 	cmd := exec.CommandContext(ctx, "go", "test", "./...")
@@ -78,7 +84,7 @@ func (b *GoBuilder) Test(ctx context.Context, project Project) error {
 // Clean cleans build artifacts
 func (b *GoBuilder) Clean(ctx context.Context, project Project) error {
 	if !project.IsGoProject() {
-		return fmt.Errorf("not a Go project")
+		return ErrNotGoProject
 	}
 
 	// Remove common build artifacts

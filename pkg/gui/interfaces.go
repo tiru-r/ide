@@ -134,6 +134,9 @@ type IDEWindow interface {
 	// GetStatusBar returns the status bar component
 	GetStatusBar() StatusBar
 
+	// GetToolBar returns the toolbar component
+	GetToolBar() ToolBar
+
 	// ShowMessage displays a message to the user
 	ShowMessage(message string)
 
@@ -192,6 +195,14 @@ type EventHandler interface {
 	OnTest() error
 }
 
+// ComponentFactory creates GUI components with loose coupling
+type ComponentFactory interface {
+	CreateFileExplorer(project core.Project) FileExplorer
+	CreateEditor() Editor
+	CreateStatusBar() StatusBar
+	CreateToolBar() ToolBar
+}
+
 // IDEConfig holds configuration for the IDE
 type IDEConfig struct {
 	Project      core.Project
@@ -199,6 +210,43 @@ type IDEConfig struct {
 	Logger       core.Logger
 	Theme        *Theme
 	EventHandler EventHandler
+
+	// Component injection (optional - falls back to factory)
+	FileExplorer FileExplorer
+	Editor       Editor
+	StatusBar    StatusBar
+	ToolBar      ToolBar
+
+	// Factory for creating components
+	Factory ComponentFactory
+}
+
+// DefaultComponentFactory implements ComponentFactory with default components
+type DefaultComponentFactory struct{}
+
+// CreateFileExplorer creates a default file explorer
+func (f *DefaultComponentFactory) CreateFileExplorer(project core.Project) FileExplorer {
+	return NewFileExplorer(project)
+}
+
+// CreateEditor creates a default text editor
+func (f *DefaultComponentFactory) CreateEditor() Editor {
+	return NewTextEditor()
+}
+
+// CreateStatusBar creates a default status bar
+func (f *DefaultComponentFactory) CreateStatusBar() StatusBar {
+	return NewStatusBar()
+}
+
+// CreateToolBar creates a default toolbar
+func (f *DefaultComponentFactory) CreateToolBar() ToolBar {
+	return NewToolBar()
+}
+
+// NewDefaultFactory creates a default component factory
+func NewDefaultFactory() ComponentFactory {
+	return &DefaultComponentFactory{}
 }
 
 // NewDefaultTheme creates a default IDE theme
